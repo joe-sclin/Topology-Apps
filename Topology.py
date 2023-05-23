@@ -130,6 +130,7 @@ class MainWindow(QMainWindow):
         :param graph: networkx directed graph
         :returns: lscc_mcds: list of MCDS nodes for LSCC
         """
+
         def phase1(lcc: nx.DiGraph):
             white = set(lcc.nodes())
             gray = set()
@@ -142,13 +143,11 @@ class MainWindow(QMainWindow):
                     max_in = max(lcc.in_degree(max_out_nodes), key=lambda x: x[1])[1]  # Max out degree
                     dom_nodes = [x[0] for x in lcc.in_degree(max_out_nodes) if
                                  x[1] == max_in]  # Nodes with max out degree
-                    # dom_node = max(lcc.in_degree(max_out_nodes), key=lambda x: x[1])[0]
                 else:
                     dom_nodes = list(max_out_nodes)
                 for node in dom_nodes:
                     black.add(node)
                     # Add all child neighbors of new black node into gray (if they are not in set black)
-                    # for node in dom_nodes:
                     gray.update(set(n for n in lcc.neighbors(node)).difference(black))
                 white = white.difference(black.union(gray))  # All remaining nodes are for next round selection
             return black, gray
@@ -198,7 +197,7 @@ class MainWindow(QMainWindow):
             return list(black_dark_gray_lcc.nodes())
 
         def phase3(cds: list, lcc: nx.DiGraph) -> list:
-            node_list = cds  # List of nodes needed to test
+            node_list = list(cds)  # List of nodes needed to test
             mcds = []
             while len(node_list) > 0:
                 min_out = min(lcc.out_degree(node_list), key=lambda x: x[1])[1]  # Min out degree
@@ -209,12 +208,9 @@ class MainWindow(QMainWindow):
                     max_in = max(lcc.in_degree(min_out_nodes), key=lambda x: x[1])[1]  # Max in degree
                     max_in_nodes = [x[0] for x in lcc.in_degree(min_out_nodes) if
                                     x[1] == max_in]  # Nodes with min out degree
-                    if len(max_in_nodes) > 1:  # Multiple nodes with the same min out and max in degrees -> test one by one
-                        testing_nodes = max_in_nodes
-                    else:
-                        testing_nodes = list(max_in_nodes)
+                    testing_nodes = max_in_nodes
                 else:
-                    testing_nodes = list(min_out_nodes)
+                    testing_nodes = min_out_nodes
                 for node in testing_nodes:
                     temp = node_list.copy()
                     temp.remove(node)
@@ -225,20 +221,20 @@ class MainWindow(QMainWindow):
                     node_list.remove(node)
             return mcds
 
-        lcc = graph.subgraph(self.lcc(graph))
-        lscc_mcds = []
-        if len(lcc.nodes()) > 1:
-            black, gray = phase1(lcc)
-            cds = lcc.subgraph(black)  # For phase 2 checking
-            if not nx.is_weakly_connected(lcc.subgraph(black)):  # Enter phase 2
-                cds = phase2(lcc, black, gray)  # Connected dominating set (Not minimum yet)
-            if len(cds) > 1:
-                min_cds = phase3(cds, lcc)
-            else:  # If cds only contains 1 node
-                min_cds = cds
-            scc = nx.strongly_connected_components(graph.subgraph(min_cds))
-            lscc_mcds = list(max(scc, key=len))
-        return lscc_mcds
+        scc = nx.strongly_connected_components(graph)
+        lscc = max(scc, key=len)
+        lcc = graph.subgraph(lscc)
+        black, gray = phase1(lcc)
+        ds = lcc.subgraph(black)  # For phase 2 checking
+        if not nx.is_weakly_connected(ds):  # Enter phase 2
+            cds = phase2(lcc, black, gray)  # Connected dominating set (Not minimum yet)
+        else:
+            cds = ds.nodes()
+        if len(cds) > 1:
+            min_cds = phase3(cds, lcc)
+        else:  # If cds only contains 1 node
+            min_cds = cds
+        return list(min_cds)
 
     def out_degree_hubs(self, graph: nx.DiGraph) -> list:
         """
@@ -258,19 +254,20 @@ class MainWindow(QMainWindow):
         res = sorted(graph.in_degree, key=lambda x: x[1], reverse=True)[:round(len(graph.nodes()) * 0.1)]
         return list(list(zip(*res))[0])
 
-    def lcc(self, G: nx.DiGraph) -> list:
+    def lcc(self, graph: nx.DiGraph) -> list:
         """
         Find nodes in the largest connected component (in DFS tree) in a directed graph
         :param graph: networkx directed graph object
         :return: networkx directed graph object
         """
-        dominator = [x[0] for x in G.in_degree() if x[1] == 0]
+        bidirectional_edges = list(set([u and v for u, v in list(graph.edges()) if graph.has_edge(v, u) and graph.has_edge(u, v)]))
+        candidate = [x[0] for x in graph.in_degree() if x[1] == 0] + bidirectional_edges
         dfs_tree = nx.dfs_tree(nx.DiGraph(), source=None)
-        for x in dominator:
-            tree = nx.dfs_tree(G, source=x)
+        for x in candidate:
+            tree = nx.dfs_tree(graph, source=x)
             if len(tree.nodes()) > len(dfs_tree.nodes()):
                 dfs_tree = tree
-        return list(dfs_tree.nodes())
+        return graph.subgraph(dfs_tree.nodes())
 
 
 if __name__ == "__main__":
